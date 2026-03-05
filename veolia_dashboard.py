@@ -53,28 +53,32 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Data loading functions
-@st.cache_data(ttl=3600)
-def load_data_from_sheets():
-    """Load data from Google Sheets"""
-    sheet_url = "https://docs.google.com/spreadsheets/d/1TnEiCIfQYxDqHoSgpS7C44XE7VS3_egmL-yMNEIlziw/export?format=csv&gid=0"
-    customer_url = "https://docs.google.com/spreadsheets/d/1TnEiCIfQYxDqHoSgpS7C44XE7VS3_egmL-yMNEIlziw/export?format=csv&gid=1"
-    
+def load_data_from_uploads(upload_ga4, upload_customers):
+    """Load and merge data from two uploaded CSV files."""
+    if upload_ga4 is None or upload_customers is None:
+        return None, None, None
     try:
-        df_ga4 = pd.read_csv(sheet_url)
-        df_customers = pd.read_csv(customer_url)
-        
-        # Clean and prepare data
-        df_ga4['date'] = pd.to_datetime(df_ga4['date'])
-        df_customers['created_at'] = pd.to_datetime(df_customers['created_at'])
-        
-        # Join datasets
+        df_ga4 = pd.read_csv(upload_ga4)
+        df_customers = pd.read_csv(upload_customers)
+
+        # Required columns
+        ga4_required = {"date", "user_id"}
+        customer_required = {"customer_id"}
+        if not ga4_required.issubset(df_ga4.columns):
+            raise ValueError(f"GA4 CSV must have columns: {ga4_required}. Found: {list(df_ga4.columns)}")
+        if not customer_required.issubset(df_customers.columns):
+            raise ValueError(f"Customers CSV must have column: customer_id. Found: {list(df_customers.columns)}")
+
+        df_ga4["date"] = pd.to_datetime(df_ga4["date"])
+        if "created_at" in df_customers.columns:
+            df_customers["created_at"] = pd.to_datetime(df_customers["created_at"])
+
         df = df_ga4.merge(
             df_customers,
-            left_on='user_id',
-            right_on='customer_id',
-            how='left'
+            left_on="user_id",
+            right_on="customer_id",
+            how="left",
         )
-        
         return df, df_ga4, df_customers
     except Exception as e:
         st.error(f"Error loading data: {e}")
@@ -103,18 +107,57 @@ def calculate_returning_users(df):
     
     return returning, new
 
-# Load data
-df, df_ga4, df_customers = load_data_from_sheets()
+# ============================================================================
+# SIDEBAR - DATA UPLOAD
+# ============================================================================
+
+st.sidebar.image("https://via.placeholder.com/200x80/0066CC/FFFFFF?text=Veolia", use_column_width=True)
+st.sidebar.markdown("### 📁 Upload data (CSV)")
+
+upload_ga4 = st.sidebar.file_uploader(
+    "GA4 / analytics data",
+    type=["csv"],
+    help="CSV with columns: date, user_id (and optionally device_category, sessions, engagement_rate, avg_engagement_time, page_views, event_name)",
+)
+upload_customers = st.sidebar.file_uploader(
+    "Customer list",
+    type=["csv"],
+    help="CSV with column: customer_id (and optionally created_at, region, sales_org)",
+)
+
+df, df_ga4, df_customers = load_data_from_uploads(upload_ga4, upload_customers)
 
 if df is None:
-    st.error("Unable to load data. Please check your connection and try again.")
+    st.info(
+        "👆 **Upload two CSV files** in the sidebar to run the dashboard:\n\n"
+        "1. **GA4 / analytics** – at least `date`, `user_id`; optional: `device_category`, `sessions`, `engagement_rate`, `avg_engagement_time`, `page_views`, `event_name`.\n\n"
+        "2. **Customer list** – at least `customer_id`; optional: `created_at`, `region`, `sales_org`, `account_id`, `company_name`."
+    )
     st.stop()
+
+# Remember which optional columns were present (before filling)
+has_account_columns = "account_id" in df.columns and "company_name" in df.columns
+
+# Ensure optional columns exist so rest of dashboard runs
+for col, default in [
+    ("sessions", 0),
+    ("engagement_rate", 0.0),
+    ("avg_engagement_time", 0.0),
+    ("page_views", 0),
+    ("event_name", ""),
+]:
+    if col not in df.columns:
+        df[col] = default
+for col, default in [("region", "N/A"), ("sales_org", "N/A"), ("account_id", ""), ("company_name", "")]:
+    if col not in df.columns:
+        df[col] = default
+if "device_category" not in df.columns:
+    df["device_category"] = "Unknown"
 
 # ============================================================================
 # SIDEBAR - FILTERS
 # ============================================================================
 
-st.sidebar.image("https://via.placeholder.com/200x80/0066CC/FFFFFF?text=Veolia", use_column_width=True)
 st.sidebar.markdown("### 📊 Dashboard Filters")
 
 # Date range filter
@@ -138,38 +181,28 @@ if date_range_options[selected_range]:
 else:
     df_filtered = df.copy()
 
-# Region filter
-all_regions = ['All Regions'] + sorted(df_customers['region'].dropna().unique().tolist())
-selected_regions = st.sidebar.multiselect(
-    'Region',
-    all_regions,
-    default=['All Regions']
-)
+# Region filter (optional column)
+if "region" in df_customers.columns:
+    all_regions = ["All Regions"] + sorted(df_customers["region"].dropna().unique().tolist())
+    selected_regions = st.sidebar.multiselect("Region", all_regions, default=["All Regions"])
+    if "All Regions" not in selected_regions and selected_regions:
+        df_filtered = df_filtered[df_filtered["region"].isin(selected_regions)]
+else:
+    selected_regions = ["All Regions"]
 
-if 'All Regions' not in selected_regions and selected_regions:
-    df_filtered = df_filtered[df_filtered['region'].isin(selected_regions)]
+# Sales Org filter (optional column)
+if "sales_org" in df_customers.columns:
+    all_sales_orgs = ["All Sales Orgs"] + sorted(df_customers["sales_org"].dropna().unique().tolist())
+    selected_sales_orgs = st.sidebar.multiselect("Sales Organization", all_sales_orgs, default=["All Sales Orgs"])
+    if "All Sales Orgs" not in selected_sales_orgs and selected_sales_orgs:
+        df_filtered = df_filtered[df_filtered["sales_org"].isin(selected_sales_orgs)]
 
-# Sales Org filter
-all_sales_orgs = ['All Sales Orgs'] + sorted(df_customers['sales_org'].dropna().unique().tolist())
-selected_sales_orgs = st.sidebar.multiselect(
-    'Sales Organization',
-    all_sales_orgs,
-    default=['All Sales Orgs']
-)
-
-if 'All Sales Orgs' not in selected_sales_orgs and selected_sales_orgs:
-    df_filtered = df_filtered[df_filtered['sales_org'].isin(selected_sales_orgs)]
-
-# Device filter
-device_options = ['All Devices'] + sorted(df_ga4['device_category'].dropna().unique().tolist())
-selected_devices = st.sidebar.multiselect(
-    'Device Category',
-    device_options,
-    default=['All Devices']
-)
-
-if 'All Devices' not in selected_devices and selected_devices:
-    df_filtered = df_filtered[df_filtered['device_category'].isin(selected_devices)]
+# Device filter (optional column)
+if "device_category" in df_ga4.columns:
+    device_options = ["All Devices"] + sorted(df_ga4["device_category"].dropna().unique().tolist())
+    selected_devices = st.sidebar.multiselect("Device Category", device_options, default=["All Devices"])
+    if "All Devices" not in selected_devices and selected_devices:
+        df_filtered = df_filtered[df_filtered["device_category"].isin(selected_devices)]
 
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"**Data updated:** {datetime.now().strftime('%Y-%m-%d %H:%M')}")
@@ -484,35 +517,36 @@ st.plotly_chart(fig, use_container_width=True)
 # SECTION 4: CUSTOMER ACCOUNT DETAILS
 # ============================================================================
 
-st.markdown('<div class="section-header">👥 Top Active Accounts</div>', unsafe_allow_html=True)
+if has_account_columns:
+    st.markdown('<div class="section-header">👥 Top Active Accounts</div>', unsafe_allow_html=True)
 
-account_activity = df_filtered.groupby(['account_id', 'company_name', 'sales_org', 'region']).agg({
-    'user_id': 'nunique',
-    'sessions': 'sum',
-    'page_views': 'sum',
-    'avg_engagement_time': 'mean'
-}).reset_index()
-account_activity.columns = [
-    'Account ID', 'Company', 'Sales Org', 'Region',
-    'Active Users', 'Total Sessions', 'Page Views', 'Avg Engagement Time'
-]
-account_activity = account_activity.sort_values('Total Sessions', ascending=False)
+    account_activity = df_filtered.groupby(["account_id", "company_name", "sales_org", "region"]).agg({
+        "user_id": "nunique",
+        "sessions": "sum",
+        "page_views": "sum",
+        "avg_engagement_time": "mean",
+    }).reset_index()
+    account_activity.columns = [
+        "Account ID", "Company", "Sales Org", "Region",
+        "Active Users", "Total Sessions", "Page Views", "Avg Engagement Time",
+    ]
+    account_activity = account_activity.sort_values("Total Sessions", ascending=False)
 
-st.dataframe(
-    account_activity.head(20),
-    hide_index=True,
-    use_container_width=True,
-    column_config={
-        'Account ID': st.column_config.TextColumn('Account ID', width='small'),
-        'Company': st.column_config.TextColumn('Company', width='medium'),
-        'Sales Org': st.column_config.TextColumn('Sales Org', width='small'),
-        'Region': st.column_config.TextColumn('Region', width='small'),
-        'Active Users': st.column_config.NumberColumn('Active Users', format='%d'),
-        'Total Sessions': st.column_config.NumberColumn('Sessions', format='%.0f'),
-        'Page Views': st.column_config.NumberColumn('Page Views', format='%.0f'),
-        'Avg Engagement Time': st.column_config.NumberColumn('Avg Time (s)', format='%.1f')
-    }
-)
+    st.dataframe(
+        account_activity.head(20),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Account ID": st.column_config.TextColumn("Account ID", width="small"),
+            "Company": st.column_config.TextColumn("Company", width="medium"),
+            "Sales Org": st.column_config.TextColumn("Sales Org", width="small"),
+            "Region": st.column_config.TextColumn("Region", width="small"),
+            "Active Users": st.column_config.NumberColumn("Active Users", format="%d"),
+            "Total Sessions": st.column_config.NumberColumn("Sessions", format="%.0f"),
+            "Page Views": st.column_config.NumberColumn("Page Views", format="%.0f"),
+            "Avg Engagement Time": st.column_config.NumberColumn("Avg Time (s)", format="%.1f"),
+        },
+    )
 
 # ============================================================================
 # SECTION 5: DEVICE & ACCESS PATTERNS
