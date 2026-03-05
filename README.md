@@ -50,11 +50,11 @@ A Streamlit dashboard for **Veolia Customer Portal Analytics** — Phase 1: Core
 The dashboard uses **manual CSV upload** in the sidebar. Upload two files:
 
 1. **GA4 / analytics CSV**  
-   - **Required columns:** `date`, `user_id`  
-   - **Optional:** `device_category`, `sessions`, `engagement_rate`, `avg_engagement_time`, `page_views`, `event_name`
+   - **Required:** A date column (or date-like values in the first column). Use the **First row of GA4 file is a title** checkbox if your CSV has a title row before the column names.  
+   - **Optional:** `user_id` (if missing, each row is treated as a unique event), `device_category`, `sessions`, `engagement_rate`, `avg_engagement_time`, `page_views`, `event_name`
 
 2. **Customer list CSV**  
-   - **Required column:** `customer_id` (must match `user_id` in the analytics file for joins)  
+   - **Required column:** `customer_id` (used to join with GA4 when `user_id` is present)  
    - **Optional:** `created_at`, `region`, `sales_org`, `account_id`, `company_name`
 
 Export your GA4 and customer data to CSV and upload them each time you open or refresh the dashboard. No API keys or Google Sheets access needed.

@@ -53,25 +53,52 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Data loading functions
-def load_data_from_uploads(upload_ga4, upload_customers):
+def _normalize_ga4_columns(df_ga4):
+    """Ensure GA4 dataframe has date column and optional user_id; add synthetic user_id if missing."""
+    # Strip whitespace from column names
+    df_ga4.columns = df_ga4.columns.str.strip()
+
+    # Find or create date column
+    if "date" not in df_ga4.columns:
+        date_candidates = [c for c in df_ga4.columns if "date" in c.lower()]
+        if date_candidates:
+            df_ga4["date"] = pd.to_datetime(df_ga4[date_candidates[0]], errors="coerce")
+        else:
+            # Try first column as date
+            first = df_ga4.columns[0]
+            df_ga4["date"] = pd.to_datetime(df_ga4[first], errors="coerce")
+        df_ga4 = df_ga4.dropna(subset=["date"])
+    else:
+        df_ga4["date"] = pd.to_datetime(df_ga4["date"], errors="coerce")
+        df_ga4 = df_ga4.dropna(subset=["date"])
+
+    # user_id is optional: add synthetic per-row id if missing
+    if "user_id" not in df_ga4.columns:
+        df_ga4["user_id"] = np.arange(len(df_ga4))
+
+    return df_ga4
+
+
+def load_data_from_uploads(upload_ga4, upload_customers, skip_ga4_first_row=False):
     """Load and merge data from two uploaded CSV files."""
     if upload_ga4 is None or upload_customers is None:
         return None, None, None
     try:
-        df_ga4 = pd.read_csv(upload_ga4)
+        df_ga4 = pd.read_csv(upload_ga4, skiprows=1 if skip_ga4_first_row else 0)
         df_customers = pd.read_csv(upload_customers)
 
-        # Required columns
-        ga4_required = {"date", "user_id"}
-        customer_required = {"customer_id"}
-        if not ga4_required.issubset(df_ga4.columns):
-            raise ValueError(f"GA4 CSV must have columns: {ga4_required}. Found: {list(df_ga4.columns)}")
-        if not customer_required.issubset(df_customers.columns):
+        # GA4: only date is required (user_id optional)
+        df_ga4 = _normalize_ga4_columns(df_ga4)
+        if df_ga4.empty:
+            raise ValueError("GA4 CSV must contain at least one date column or date-like values.")
+
+        # Customer list: require customer_id
+        df_customers.columns = df_customers.columns.str.strip()
+        if "customer_id" not in df_customers.columns:
             raise ValueError(f"Customers CSV must have column: customer_id. Found: {list(df_customers.columns)}")
 
-        df_ga4["date"] = pd.to_datetime(df_ga4["date"])
         if "created_at" in df_customers.columns:
-            df_customers["created_at"] = pd.to_datetime(df_customers["created_at"])
+            df_customers["created_at"] = pd.to_datetime(df_customers["created_at"], errors="coerce")
 
         df = df_ga4.merge(
             df_customers,
@@ -117,7 +144,12 @@ st.sidebar.markdown("### 📁 Upload data (CSV)")
 upload_ga4 = st.sidebar.file_uploader(
     "GA4 / analytics data",
     type=["csv"],
-    help="CSV with columns: date, user_id (and optionally device_category, sessions, engagement_rate, avg_engagement_time, page_views, event_name)",
+    help="CSV with a date column (required). user_id optional. First row can be a title.",
+)
+skip_ga4_header = st.sidebar.checkbox(
+    "First row of GA4 file is a title (use next row as column names)",
+    value=False,
+    help="Check this if your CSV has a title row like 'Login Success Metrics' before the column names.",
 )
 upload_customers = st.sidebar.file_uploader(
     "Customer list",
@@ -125,12 +157,14 @@ upload_customers = st.sidebar.file_uploader(
     help="CSV with column: customer_id (and optionally created_at, region, sales_org)",
 )
 
-df, df_ga4, df_customers = load_data_from_uploads(upload_ga4, upload_customers)
+df, df_ga4, df_customers = load_data_from_uploads(upload_ga4, upload_customers, skip_ga4_first_row=skip_ga4_header)
 
 if df is None:
     st.info(
         "👆 **Upload two CSV files** in the sidebar to run the dashboard:\n\n"
-        "1. **GA4 / analytics** – at least `date`, `user_id`; optional: `device_category`, `sessions`, `engagement_rate`, `avg_engagement_time`, `page_views`, `event_name`.\n\n"
+        "1. **GA4 / analytics** – a **date** column is required (or date-like values in the first column). "
+        "`user_id` is optional. Optional: `device_category`, `sessions`, `engagement_rate`, `page_views`, etc. "
+        "If the first row is a title, check **First row of GA4 file is a title**.\n\n"
         "2. **Customer list** – at least `customer_id`; optional: `created_at`, `region`, `sales_org`, `account_id`, `company_name`."
     )
     st.stop()
