@@ -13,7 +13,7 @@ A Streamlit dashboard for **Veolia Customer Portal Analytics** — Phase 1: Core
 ## Requirements
 
 - Python 3.9+
-- Dependencies listed in `veolia_requirements.txt`
+- Dependencies listed in `requirements.txt`
 
 ## Setup
 
@@ -27,7 +27,7 @@ A Streamlit dashboard for **Veolia Customer Portal Analytics** — Phase 1: Core
    ```bash
    python -m venv venv
    source venv/bin/activate   # On Windows: venv\Scripts\activate
-   pip install -r veolia_requirements.txt
+   pip install -r requirements.txt
    ```
 
 3. **Run the dashboard**
@@ -42,7 +42,7 @@ A Streamlit dashboard for **Veolia Customer Portal Analytics** — Phase 1: Core
 | File | Description |
 |------|-------------|
 | `veolia_dashboard.py` | Main Streamlit app and analytics logic |
-| `veolia_requirements.txt` | Python dependencies (Streamlit, pandas, Plotly, etc.) |
+| `requirements.txt` | Python dependencies (Streamlit, pandas, Plotly, etc.) |
 
 ## Data
 
